@@ -105,56 +105,55 @@ def printASN1(d, l, rl):
 # extract records from a BSD DB 1.85, hash mode
 # obsolete with Firefox 58.0.2 and NSS 3.35, as key4.db (SQLite) is used
 def readBsddb(name):
-    f = open(name, 'rb')
-    # http://download.oracle.com/berkeley-db/db.1.85.tar.gz
-    header = f.read(4 * 15)
-    magic = getLongBE(header, 0)
-    if magic != 0x61561:
-        print('bad magic number')
-        sys.exit()
-    version = getLongBE(header, 4)
-    if version != 2:
-        print('bad version, !=2 (1.85)')
-        sys.exit()
-    pagesize = getLongBE(header, 12)
-    nkeys = getLongBE(header, 0x38)
-    if options.verbose > 1:
-        print('pagesize=0x%x' % pagesize)
-        print('nkeys=%d' % nkeys)
+    with open(name, 'rb') as f:
+        # http://download.oracle.com/berkeley-db/db.1.85.tar.gz
+        header = f.read(4 * 15)
+        magic = getLongBE(header, 0)
+        if magic != 0x61561:
+            print('bad magic number')
+            sys.exit()
+        version = getLongBE(header, 4)
+        if version != 2:
+            print('bad version, !=2 (1.85)')
+            sys.exit()
+        pagesize = getLongBE(header, 12)
+        nkeys = getLongBE(header, 0x38)
+        if options.verbose > 1:
+            print('pagesize=0x%x' % pagesize)
+            print('nkeys=%d' % nkeys)
 
-    readkeys = 0
-    page = 1
-    nval = 0
-    val = 1
-    db1 = []
-    while readkeys < nkeys:
-        f.seek(pagesize * page)
-        offsets = f.read((nkeys + 1) * 4 + 2)
-        offsetVals = []
-        i = 0
+        readkeys = 0
+        page = 1
         nval = 0
         val = 1
-        keys = 0
-        while nval != val:
-            keys += 1
-            key = getShortLE(offsets, 2 + i)
-            val = getShortLE(offsets, 4 + i)
-            nval = getShortLE(offsets, 8 + i)
-            # print 'key=0x%x, val=0x%x' % (key, val)
-            offsetVals.append(key + pagesize * page)
-            offsetVals.append(val + pagesize * page)
-            readkeys += 1
-            i += 4
-        offsetVals.append(pagesize * (page + 1))
-        valKey = sorted(offsetVals)
-        for i in range(keys * 2):
-            # print '%x %x' % (valKey[i], valKey[i+1])
-            f.seek(valKey[i])
-            data = f.read(valKey[i + 1] - valKey[i])
-            db1.append(data)
-        page += 1
-        # print 'offset=0x%x' % (page*pagesize)
-    f.close()
+        db1 = []
+        while readkeys < nkeys:
+            f.seek(pagesize * page)
+            offsets = f.read((nkeys + 1) * 4 + 2)
+            offsetVals = []
+            i = 0
+            nval = 0
+            val = 1
+            keys = 0
+            while nval != val:
+                keys += 1
+                key = getShortLE(offsets, 2 + i)
+                val = getShortLE(offsets, 4 + i)
+                nval = getShortLE(offsets, 8 + i)
+                # print 'key=0x%x, val=0x%x' % (key, val)
+                offsetVals.append(key + pagesize * page)
+                offsetVals.append(val + pagesize * page)
+                readkeys += 1
+                i += 4
+            offsetVals.append(pagesize * (page + 1))
+            valKey = sorted(offsetVals)
+            for i in range(keys * 2):
+                # print '%x %x' % (valKey[i], valKey[i+1])
+                f.seek(valKey[i])
+                data = f.read(valKey[i + 1] - valKey[i])
+                db1.append(data)
+            page += 1
+            # print 'offset=0x%x' % (page*pagesize)
     db = {}
 
     for i in range(0, len(db1), 2):
@@ -204,8 +203,8 @@ def getLoginData():
     sqlite_file = options.directory / 'signons.sqlite'
     json_file = options.directory / 'logins.json'
     if json_file.exists():  # since Firefox 32, json is used instead of sqlite3
-        loginf = open(json_file, 'r').read()
-        jsonLogins = json.loads(loginf)
+        with open(json_file, 'r') as loginf:
+            jsonLogins = json.load(loginf)
         if 'logins' not in jsonLogins:
             print('error: no \'logins\' key in logins.json')
             return []
