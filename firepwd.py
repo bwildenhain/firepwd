@@ -422,28 +422,33 @@ def getKey(masterPassword, directory, verbose=0):
         return None, None
 
 
-parser = ArgumentParser()
-parser.add_argument("-v", "--verbose", action="count", help="verbose level", default=0)
-parser.add_argument("-p", "--password", dest="masterPassword", help="masterPassword", default='')
-parser.add_argument("-d", "--dir", type=Path, dest="directory", help="directory", default=Path.cwd())
-args = parser.parse_args()
+def main(args=None):
+    parser = ArgumentParser()
+    parser.add_argument("-v", "--verbose", action="count", help="verbose level", default=0)
+    parser.add_argument("-p", "--password", dest="masterPassword", help="masterPassword", default='')
+    parser.add_argument("-d", "--dir", type=Path, dest="directory", help="directory", default=Path.cwd())
+    args = parser.parse_args(args)
 
-key, algo = getKey(args.masterPassword.encode(), args.directory, verbose=args.verbose)
-if key is None:
-    sys.exit()
-# print(hexlify(key))
-logins = getLoginData(args.directory, verbose=args.verbose)
-if len(logins) == 0:
-    print('no stored passwords')
-else:
-    print('decrypting login/password pairs')
-if algo == '1.2.840.113549.1.12.5.1.3' or algo == '1.2.840.113549.1.5.13':
-    for i in logins:
-        assert i[0][0] == CKA_ID
-        print('%20s:' % (i[2]), end='')  # site URL
-        iv = i[0][1]
-        ciphertext = i[0][2]
-        print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8), end=',')
-        iv = i[1][1]
-        ciphertext = i[1][2]
-        print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8))
+    key, algo = getKey(args.masterPassword.encode(), args.directory, verbose=args.verbose)
+    if key is None:
+        sys.exit()
+    # print(hexlify(key))
+    logins = getLoginData(args.directory, verbose=args.verbose)
+    if len(logins) == 0:
+        print('no stored passwords')
+    else:
+        print('decrypting login/password pairs')
+    if algo == '1.2.840.113549.1.12.5.1.3' or algo == '1.2.840.113549.1.5.13':
+        for i in logins:
+            assert i[0][0] == CKA_ID
+            print('%20s:' % (i[2]), end='')  # site URL
+            iv = i[0][1]
+            ciphertext = i[0][2]
+            print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8), end=',')
+            iv = i[1][1]
+            ciphertext = i[1][2]
+            print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8))
+
+
+if __name__ == '__main__':
+    main()
