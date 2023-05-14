@@ -207,7 +207,7 @@ def getLoginData():
     return logins  
   elif sqlite_file.exists(): #firefox < 32
     print('sqlite')
-    conn = sqlite3.connect(sqlite_file)
+    conn = sqlite3.connect(str(sqlite_file))
     c = conn.cursor()
     c.execute("SELECT * FROM moz_logins;")
     for row in c:
@@ -373,7 +373,7 @@ def decryptPBE(decodedItem, masterPassword, globalSalt):
 
 def getKey( masterPassword, directory ):  
   if (directory / 'key4.db').exists():
-    conn = sqlite3.connect(directory / 'key4.db') #firefox 58.0.2 / NSS 3.35 with key4.db in SQLite
+    conn = sqlite3.connect(str(directory / 'key4.db')) #firefox 58.0.2 / NSS 3.35 with key4.db in SQLite
     c = conn.cursor()
     #first check password
     c.execute("SELECT item1,item2 FROM metadata WHERE id = 'password';")
