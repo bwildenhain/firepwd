@@ -29,7 +29,7 @@ import hmac
 from Crypto.Cipher import DES3, AES
 from Crypto.Util.number import long_to_bytes
 from Crypto.Util.Padding import unpad
-from optparse import OptionParser
+from argparse import ArgumentParser
 import json
 from pathlib import Path
 
@@ -104,7 +104,7 @@ def printASN1(d, l, rl):
 
 # extract records from a BSD DB 1.85, hash mode
 # obsolete with Firefox 58.0.2 and NSS 3.35, as key4.db (SQLite) is used
-def readBsddb(name):
+def readBsddb(name, verbose=0):
     with open(name, 'rb') as f:
         # http://download.oracle.com/berkeley-db/db.1.85.tar.gz
         header = f.read(4 * 15)
@@ -118,7 +118,7 @@ def readBsddb(name):
             sys.exit()
         pagesize = getLongBE(header, 12)
         nkeys = getLongBE(header, 0x38)
-        if options.verbose > 1:
+        if verbose > 1:
             print('pagesize=0x%x' % pagesize)
             print('nkeys=%d' % nkeys)
 
@@ -158,13 +158,13 @@ def readBsddb(name):
 
     for i in range(0, len(db1), 2):
         db[db1[i + 1]] = db1[i]
-    if options.verbose > 1:
+    if verbose > 1:
         for i in db:
             print('%s: %s' % (repr(i), hexlify(db[i])))
     return db
 
 
-def decryptMoz3DES(globalSalt, masterPassword, entrySalt, encryptedData):
+def decryptMoz3DES(globalSalt, masterPassword, entrySalt, encryptedData, verbose=0):
     # see http://www.drh-consultancy.demon.co.uk/key3.html
     hp = sha1(globalSalt + masterPassword).digest()
     pes = entrySalt + b'\x00' * (20 - len(entrySalt))
@@ -175,7 +175,7 @@ def decryptMoz3DES(globalSalt, masterPassword, entrySalt, encryptedData):
     k = k1 + k2
     iv = k[-8:]
     key = k[:24]
-    if options.verbose > 0:
+    if verbose > 0:
         print('key= %s, iv=%s' % (hexlify(key), hexlify(iv)))
     return DES3.new(key, DES3.MODE_CBC, iv).decrypt(encryptedData)
 
@@ -198,10 +198,10 @@ def decodeLoginData(data):
     return key_id, iv, ciphertext
 
 
-def getLoginData():
+def getLoginData(directory: Path, verbose=0):
     logins = []
-    sqlite_file = options.directory / 'signons.sqlite'
-    json_file = options.directory / 'logins.json'
+    sqlite_file = directory / 'signons.sqlite'
+    json_file = directory / 'logins.json'
     if json_file.exists():  # since Firefox 32, json is used instead of sqlite3
         with open(json_file, 'r') as loginf:
             jsonLogins = json.load(loginf)
@@ -221,7 +221,7 @@ def getLoginData():
         for row in c:
             encUsername = row[6]
             encPassword = row[7]
-            if options.verbose > 1:
+            if verbose > 1:
                 print(row[1], encUsername, encPassword)
             logins.append((decodeLoginData(encUsername), decodeLoginData(encPassword), row[1]))
         return logins
@@ -232,18 +232,18 @@ def getLoginData():
 CKA_ID = unhexlify('f8000000000000000000000000000001')
 
 
-def extractSecretKey(masterPassword, keyData):  # 3DES
+def extractSecretKey(masterPassword, keyData, verbose=0):  # 3DES
     # see http://www.drh-consultancy.demon.co.uk/key3.html
     pwdCheck = keyData[b'password-check']
     entrySaltLen = pwdCheck[1]
     entrySalt = pwdCheck[3 : 3 + entrySaltLen]
     encryptedPasswd = pwdCheck[-16:]
     globalSalt = keyData[b'global-salt']
-    if options.verbose > 1:
+    if verbose > 1:
         print('password-check=%s' % hexlify(pwdCheck))
         print('entrySalt=%s' % hexlify(entrySalt))
         print('globalSalt=%s' % hexlify(globalSalt))
-    cleartextData = decryptMoz3DES(globalSalt, masterPassword, entrySalt, encryptedPasswd)
+    cleartextData = decryptMoz3DES(globalSalt, masterPassword, entrySalt, encryptedPasswd, verbose)
     if cleartextData != b'password-check\x02\x02':
         print('password check error, Master Password is certainly used, please provide it with -p option')
         sys.exit()
@@ -272,9 +272,9 @@ def extractSecretKey(masterPassword, keyData):  # 3DES
   '''
     entrySalt = privKeyEntryASN1[0][0][1][0].asOctets()
     privKeyData = privKeyEntryASN1[0][1].asOctets()
-    privKey = decryptMoz3DES(globalSalt, masterPassword, entrySalt, privKeyData)
+    privKey = decryptMoz3DES(globalSalt, masterPassword, entrySalt, privKeyData, verbose)
     print('decrypting privKeyData')
-    if options.verbose > 0:
+    if verbose > 0:
         print('entrySalt=%s' % hexlify(entrySalt))
         print('privKeyData=%s' % hexlify(privKeyData))
         print('decrypted=%s' % hexlify(privKey))
@@ -308,12 +308,12 @@ def extractSecretKey(masterPassword, keyData):  # 3DES
   '''
     prKeyASN1 = decoder.decode(prKey)
     key = long_to_bytes(prKeyASN1[0][3])
-    if options.verbose > 0:
+    if verbose > 0:
         print('key=%s' % (hexlify(key)))
     return key
 
 
-def decryptPBE(decodedItem, masterPassword, globalSalt):
+def decryptPBE(decodedItem, masterPassword, globalSalt, verbose=0):
     pbeAlgo = str(decodedItem[0][0][0])
     if pbeAlgo == '1.2.840.113549.1.12.5.1.3':  # pbeWithSha1AndTripleDES-CBC
         """
@@ -331,7 +331,7 @@ def decryptPBE(decodedItem, masterPassword, globalSalt):
         entrySalt = decodedItem[0][0][1][0].asOctets()
         cipherT = decodedItem[0][1].asOctets()
         print('entrySalt:', hexlify(entrySalt))
-        key = decryptMoz3DES(globalSalt, masterPassword, entrySalt, cipherT)
+        key = decryptMoz3DES(globalSalt, masterPassword, entrySalt, cipherT, verbose)
         print(hexlify(key))
         return key[:24], pbeAlgo
     elif pbeAlgo == '1.2.840.113549.1.5.13':  # pkcs5 pbes2
@@ -382,7 +382,7 @@ def decryptPBE(decodedItem, masterPassword, globalSalt):
         return clearText, pbeAlgo
 
 
-def getKey(masterPassword, directory):
+def getKey(masterPassword, directory, verbose=0):
     if (directory / 'key4.db').exists():
         conn = sqlite3.connect(str(directory / 'key4.db'))  # firefox 58.0.2 / NSS 3.35 with key4.db in SQLite
         c = conn.cursor()
@@ -394,7 +394,7 @@ def getKey(masterPassword, directory):
         item2 = row[1]
         printASN1(item2, len(item2), 0)
         decodedItem2 = decoder.decode(item2)
-        clearText, algo = decryptPBE(decodedItem2, masterPassword, globalSalt)
+        clearText, algo = decryptPBE(decodedItem2, masterPassword, globalSalt, verbose)
 
         print('password check?', clearText == b'password-check\x02\x02')
         if clearText == b'password-check\x02\x02':
@@ -414,26 +414,25 @@ def getKey(masterPassword, directory):
                 print('no saved login/password')
         return None, None
     elif (directory / 'key3.db').exists():
-        keyData = readBsddb(directory / 'key3.db')
-        key = extractSecretKey(masterPassword, keyData)
+        keyData = readBsddb(directory / 'key3.db', verbose)
+        key = extractSecretKey(masterPassword, keyData, verbose)
         return key, '1.2.840.113549.1.12.5.1.3'
     else:
         print('cannot find key4.db or key3.db')
         return None, None
 
 
-parser = OptionParser(usage="usage: %prog [options]")
-parser.add_option("-v", "--verbose", type="int", dest="verbose", help="verbose level", default=0)
-parser.add_option("-p", "--password", type="string", dest="masterPassword", help="masterPassword", default='')
-parser.add_option("-d", "--dir", type="string", dest="directory", help="directory", default='')
-(options, args) = parser.parse_args()
-options.directory = Path(options.directory)
+parser = ArgumentParser()
+parser.add_argument("-v", "--verbose", action="count", help="verbose level", default=0)
+parser.add_argument("-p", "--password", dest="masterPassword", help="masterPassword", default='')
+parser.add_argument("-d", "--dir", type=Path, dest="directory", help="directory", default=Path.cwd())
+args = parser.parse_args()
 
-key, algo = getKey(options.masterPassword.encode(), options.directory)
+key, algo = getKey(args.masterPassword.encode(), args.directory, verbose=args.verbose)
 if key is None:
     sys.exit()
 # print(hexlify(key))
-logins = getLoginData()
+logins = getLoginData(args.directory, verbose=args.verbose)
 if len(logins) == 0:
     print('no stored passwords')
 else:
