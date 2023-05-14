@@ -109,13 +109,11 @@ def readBsddb(name, verbose=0):
         # http://download.oracle.com/berkeley-db/db.1.85.tar.gz
         header = f.read(4 * 15)
         magic = getLongBE(header, 0)
-        if magic != 0x61561:
-            print('bad magic number')
-            sys.exit()
+        assert magic == 0x61561, \
+            'bad magic number 0x%05x (expected 0x61561)' % magic
         version = getLongBE(header, 4)
-        if version != 2:
-            print('bad version, !=2 (1.85)')
-            sys.exit()
+        assert version == 2, \
+            'bad version %d (expected 2 for BSD DB 1.85)' % version
         pagesize = getLongBE(header, 12)
         nkeys = getLongBE(header, 0x38)
         if verbose > 1:
@@ -205,9 +203,8 @@ def getLoginData(directory: Path, verbose=0):
     if json_file.exists():  # since Firefox 32, json is used instead of sqlite3
         with open(json_file, 'r') as loginf:
             jsonLogins = json.load(loginf)
-        if 'logins' not in jsonLogins:
-            print('error: no \'logins\' key in logins.json')
-            return []
+        assert 'logins' in jsonLogins, \
+            "no 'login' key in logins.json"
         for row in jsonLogins['logins']:
             encUsername = row['encryptedUsername']
             encPassword = row['encryptedPassword']
@@ -226,7 +223,7 @@ def getLoginData(directory: Path, verbose=0):
             logins.append((decodeLoginData(encUsername), decodeLoginData(encPassword), row[1]))
         return logins
     else:
-        print('missing logins.json or signons.sqlite')
+        raise RuntimeError('cannot find logins.json or signons.sqlite in %s', directory)
 
 
 CKA_ID = unhexlify('f8000000000000000000000000000001')
@@ -245,8 +242,7 @@ def extractSecretKey(masterPassword, keyData, verbose=0):  # 3DES
         print('globalSalt=%s' % hexlify(globalSalt))
     cleartextData = decryptMoz3DES(globalSalt, masterPassword, entrySalt, encryptedPasswd, verbose)
     if cleartextData != b'password-check\x02\x02':
-        print('password check error, Master Password is certainly used, please provide it with -p option')
-        sys.exit()
+        raise RuntimeError('password check error, Master Password is certainly used, please provide it with -p option')
 
     if CKA_ID not in keyData:
         return None
@@ -398,28 +394,23 @@ def getKey(masterPassword, directory, verbose=0):
 
         print('password check?', clearText == b'password-check\x02\x02')
         if clearText == b'password-check\x02\x02':
-            c.execute("SELECT a11,a102 FROM nssPrivate;")
-            for row in c:
-                if row[0] is not None:
-                    break
-            a11 = row[0]  # CKA_VALUE
-            a102 = row[1]
-            if a102 == CKA_ID:
-                printASN1(a11, len(a11), 0)
-                decoded_a11 = decoder.decode(a11)
-                # decrypt master key
-                clearText, algo = decryptPBE(decoded_a11, masterPassword, globalSalt)
-                return clearText[:24], algo
-            else:
-                print('no saved login/password')
+            c.execute("SELECT a11 FROM nssPrivate WHERE a11 IS NOT NULL and a102=?;", (CKA_ID,))
+            row = c.fetchone()
+            if row is None:
+                raise RuntimeError('no saved login/password')
+            a11, = row
+            printASN1(a11, len(a11), 0)
+            decoded_a11 = decoder.decode(a11)
+            # decrypt master key
+            clearText, algo = decryptPBE(decoded_a11, masterPassword, globalSalt)
+            return clearText[:24], algo
         return None, None
     elif (directory / 'key3.db').exists():
         keyData = readBsddb(directory / 'key3.db', verbose)
         key = extractSecretKey(masterPassword, keyData, verbose)
         return key, '1.2.840.113549.1.12.5.1.3'
     else:
-        print('cannot find key4.db or key3.db')
-        return None, None
+        raise RuntimeError('cannot find key4.db or key3.db in %s' % directory)
 
 
 def main(args=None):
@@ -429,11 +420,12 @@ def main(args=None):
     parser.add_argument("-d", "--dir", type=Path, dest="directory", help="directory", default=Path.cwd())
     args = parser.parse_args(args)
 
-    key, algo = getKey(args.masterPassword.encode(), args.directory, verbose=args.verbose)
-    if key is None:
-        sys.exit()
+    try:
+        key, algo = getKey(args.masterPassword.encode(), args.directory, verbose=args.verbose)
+        logins = getLoginData(args.directory, verbose=args.verbose)
+    except Exception as e:
+        parser.error(e.args[0])
     # print(hexlify(key))
-    logins = getLoginData(args.directory, verbose=args.verbose)
     if len(logins) == 0:
         print('no stored passwords')
     else:
