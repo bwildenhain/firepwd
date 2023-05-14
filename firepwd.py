@@ -60,7 +60,6 @@ def printASN1(d, l, rl):
     type = d[0]
     length = d[1]
     if length & 0x80 > 0:  # http://luca.ntop.org/Teaching/Appunti/asn1.html,
-        nByteLength = length & 0x7F
         length = d[2]
         # Long form. Two to 127 octets. Bit 8 of first octet has value "1" and bits 7-1 give the number of additional length octets.
         skip = 1
@@ -309,7 +308,6 @@ def extractSecretKey(masterPassword, keyData):  # 3DES
    }
   '''
     prKeyASN1 = decoder.decode(prKey)
-    id = prKeyASN1[0][1]
     key = long_to_bytes(prKeyASN1[0][3])
     if options.verbose > 0:
         print('key=%s' % (hexlify(key)))
@@ -403,7 +401,7 @@ def getKey(masterPassword, directory):
         if clearText == b'password-check\x02\x02':
             c.execute("SELECT a11,a102 FROM nssPrivate;")
             for row in c:
-                if row[0] != None:
+                if row[0] is not None:
                     break
             a11 = row[0]  # CKA_VALUE
             a102 = row[1]
@@ -433,7 +431,7 @@ parser.add_option("-d", "--dir", type="string", dest="directory", help="director
 options.directory = Path(options.directory)
 
 key, algo = getKey(options.masterPassword.encode(), options.directory)
-if key == None:
+if key is None:
     sys.exit()
 # print(hexlify(key))
 logins = getLoginData()
