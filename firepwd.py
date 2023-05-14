@@ -178,7 +178,7 @@ def decryptMoz3DES(globalSalt, masterPassword, entrySalt, encryptedData, verbose
     return DES3.new(key, DES3.MODE_CBC, iv).decrypt(encryptedData)
 
 
-def decodeLoginData(data):
+def decodeLoginData(data: str, key: bytes):
     '''
     SEQUENCE {
       OCTETSTRING b'f8000000000000000000000000000001'
@@ -193,10 +193,11 @@ def decodeLoginData(data):
     key_id = asn1data[0][0].asOctets()
     iv = asn1data[0][1][1].asOctets()
     ciphertext = asn1data[0][2].asOctets()
-    return key_id, iv, ciphertext
+    assert key_id == CKA_ID
+    return unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8)
 
 
-def getLoginData(directory: Path, verbose=0):
+def getLoginData(directory: Path, key: bytes, verbose=0):
     sqlite_file = directory / 'signons.sqlite'
     json_file = directory / 'logins.json'
     if json_file.exists():  # since Firefox 32, json is used instead of sqlite3
@@ -205,7 +206,7 @@ def getLoginData(directory: Path, verbose=0):
         assert 'logins' in jsonLogins, \
             "no 'login' key in logins.json"
         return [
-            (decodeLoginData(row['encryptedUsername']), decodeLoginData(row['encryptedPassword']), row['hostname'])
+            (decodeLoginData(row['encryptedUsername'], key), decodeLoginData(row['encryptedPassword'], key), row['hostname'])
             for row in jsonLogins['logins']
         ]
     elif sqlite_file.exists():  # firefox < 32
@@ -214,7 +215,7 @@ def getLoginData(directory: Path, verbose=0):
             with conn.cursor() as c:
                 c.execute("SELECT encryptedUsername, encryptedPassword, hostname FROM moz_logins;")
                 return [
-                    (decodeLoginData(row[0]), decodeLoginData(row[1]), row[2])
+                    (decodeLoginData(row[0], key), decodeLoginData(row[1], key), row[2])
                     for row in c
                 ]
     else:
@@ -417,7 +418,7 @@ def main(args=None):
 
     try:
         key, algo = getKey(args.masterPassword.encode(), args.directory, verbose=args.verbose)
-        logins = getLoginData(args.directory, verbose=args.verbose)
+        logins = getLoginData(args.directory, key, verbose=args.verbose)
     except Exception as e:
         parser.error(e.args[0])
     # print(hexlify(key))
@@ -427,13 +428,7 @@ def main(args=None):
         print('decrypting login/password pairs')
     if algo == '1.2.840.113549.1.12.5.1.3' or algo == '1.2.840.113549.1.5.13':
         for username, password, hostname in logins:
-            id, iv, ciphertext = username
-            assert id == CKA_ID
-            print('%s:' % hostname, end='')  # site URL
-            print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8), end=',')
-            id, iv, ciphertext = password
-            assert id == CKA_ID
-            print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8))
+            print('%s: %s, %s' % (hostname, username, password))
 
 
 if __name__ == '__main__':
