@@ -197,7 +197,6 @@ def decodeLoginData(data):
 
 
 def getLoginData(directory: Path, verbose=0):
-    logins = []
     sqlite_file = directory / 'signons.sqlite'
     json_file = directory / 'logins.json'
     if json_file.exists():  # since Firefox 32, json is used instead of sqlite3
@@ -205,23 +204,19 @@ def getLoginData(directory: Path, verbose=0):
             jsonLogins = json.load(loginf)
         assert 'logins' in jsonLogins, \
             "no 'login' key in logins.json"
-        for row in jsonLogins['logins']:
-            encUsername = row['encryptedUsername']
-            encPassword = row['encryptedPassword']
-            logins.append((decodeLoginData(encUsername), decodeLoginData(encPassword), row['hostname']))
-        return logins
+        return [
+            (decodeLoginData(row['encryptedUsername']), decodeLoginData(row['encryptedPassword']), row['hostname'])
+            for row in jsonLogins['logins']
+        ]
     elif sqlite_file.exists():  # firefox < 32
         print('sqlite')
-        conn = sqlite3.connect(str(sqlite_file))
-        c = conn.cursor()
-        c.execute("SELECT * FROM moz_logins;")
-        for row in c:
-            encUsername = row[6]
-            encPassword = row[7]
-            if verbose > 1:
-                print(row[1], encUsername, encPassword)
-            logins.append((decodeLoginData(encUsername), decodeLoginData(encPassword), row[1]))
-        return logins
+        with sqlite3.connect(str(sqlite_file)) as conn:
+            with conn.cursor() as c:
+                c.execute("SELECT encryptedUsername, encryptedPassword, hostname FROM moz_logins;")
+                return [
+                    (decodeLoginData(row[0]), decodeLoginData(row[1]), row[2])
+                    for row in c
+                ]
     else:
         raise RuntimeError('cannot find logins.json or signons.sqlite in %s', directory)
 
@@ -431,14 +426,13 @@ def main(args=None):
     else:
         print('decrypting login/password pairs')
     if algo == '1.2.840.113549.1.12.5.1.3' or algo == '1.2.840.113549.1.5.13':
-        for i in logins:
-            assert i[0][0] == CKA_ID
-            print('%20s:' % (i[2]), end='')  # site URL
-            iv = i[0][1]
-            ciphertext = i[0][2]
+        for username, password, hostname in logins:
+            id, iv, ciphertext = username
+            assert id == CKA_ID
+            print('%s:' % hostname, end='')  # site URL
             print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8), end=',')
-            iv = i[1][1]
-            ciphertext = i[1][2]
+            id, iv, ciphertext = password
+            assert id == CKA_ID
             print(unpad(DES3.new(key, DES3.MODE_CBC, iv).decrypt(ciphertext), 8))
 
 
